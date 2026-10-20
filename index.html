@@ -1,0 +1,2212 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LinkPass — Publication: sealed vault, quorum export, and credential injection</title>
+<meta name="description" content="Technical publication for LinkPass: an enterprise password vault with a 12-word seal/unseal phrase, AES-256-GCM at rest, mandatory TOTP, RBAC, quorum-controlled export, and an MV3 browser extension. Scope, architecture, findings, limits, and evidence.">
+<meta name="author" content="David Idemudia Odige">
+<link rel="canonical" href="https://odigiedavididemudia.github.io/LinkPass/">
+<meta property="og:title" content="LinkPass — Publication">
+<meta property="og:description" content="A team vault that can be sealed. What was built, how the seal works, what the quorum protects, and what remains unfinished.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://odigiedavididemudia.github.io/LinkPass/">
+<meta property="og:image" content="https://odigiedavididemudia.github.io/LinkPass/assets/brand-linkpass.jpg">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "LinkPass — Publication",
+  "description": "A technical record of an enterprise password vault: seal/unseal lifecycle, AES-256-GCM storage, RBAC, quorum export, browser-extension injection, findings, and limits.",
+  "url": "https://odigiedavididemudia.github.io/LinkPass/",
+  "image": "https://odigiedavididemudia.github.io/LinkPass/assets/brand-linkpass.jpg",
+  "inLanguage": "en",
+  "datePublished": "2026-10-20",
+  "dateModified": "2026-10-20",
+  "keywords": "password manager, vault, AES-256-GCM, PBKDF2, BIP-39, TOTP, RBAC, quorum approval, browser extension",
+  "author": [
+    {
+      "@type": "Person",
+      "name": "David Idemudia Odige",
+      "url": "https://github.com/OdigieDavidIdemudia"
+    }
+  ]
+}
+</script>
+<script>
+(function () {
+  try {
+    var saved = localStorage.getItem('linkpass-publication-theme');
+    var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.setAttribute('data-theme', saved || (prefersDark ? 'dark' : 'light'));
+  } catch (e) {
+    document.documentElement.setAttribute('data-theme', 'light');
+  }
+})();
+</script>
+<style>
+/* ============================================================
+   LinkPass publication
+   Visual language: neobrutalism, Space Grotesk / Inter / JetBrains Mono,
+   pink + blue accents, 2px rules and hard shadows.
+   ============================================================ */
+
+:root {
+  color-scheme: light;
+
+  --bg: #F5F5F5;
+  --panel: #FFFFFF;
+  --panel-alt: #EAEAEA;
+  --ink: #111111;
+  --muted: #4B5563;
+  --faint: #6B7280;
+  --line: #111111;
+  --line-soft: #D1D5DB;
+
+  --pink: #FF5D73;
+  --pink-ink: #BE123C;
+  --pink-soft: #FFE4E8;
+  --blue: #1D4ED8;
+  --blue-soft: #DBEAFE;
+  --cream: #F7F3EA;
+
+  --shadow-sm: 2px 2px 0 var(--ink);
+  --shadow: 4px 4px 0 var(--ink);
+  --shadow-lg: 6px 6px 0 var(--ink);
+  --radius: 4px;
+
+  --fh: "Space Grotesk", "Inter", sans-serif;
+  --fb: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --fm: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --max: 1140px;
+  --gutter: clamp(20px, 5vw, 48px);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #222222;
+  --panel: #2E2E2E;
+  --panel-alt: #262626;
+  --ink: #E5E5E5;
+  --muted: #B8B8B8;
+  --faint: #A0A0A0;
+  --line: #E5E5E5;
+  --line-soft: #444444;
+
+  --pink: #FF7A8A;
+  --pink-ink: #FF9AA8;
+  --pink-soft: #3A1D24;
+  --blue: #60A5FA;
+  --blue-soft: #172A45;
+  --cream: #F7F3EA;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--fb);
+  font-size: 16px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection { background: var(--pink); color: #111111; }
+
+a {
+  color: var(--blue);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+a:hover { color: var(--pink-ink); }
+
+:focus-visible {
+  outline: 3px solid var(--blue);
+  outline-offset: 3px;
+}
+
+img { max-width: 100%; height: auto; }
+
+h1, h2, h3, h4 {
+  margin: 0;
+  font-family: var(--fh);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  color: var(--ink);
+  text-wrap: balance;
+}
+
+p { margin: 0 0 1em; }
+p:last-child { margin-bottom: 0; }
+
+code, pre, .mono { font-family: var(--fm); }
+
+code {
+  font-size: 0.84em;
+  background: var(--panel-alt);
+  border: 1px solid var(--line-soft);
+  border-radius: 2px;
+  padding: 0.1em 0.35em;
+  overflow-wrap: break-word;
+}
+
+pre {
+  margin: 1.25em 0 0;
+  padding: 16px 18px;
+  background: #111111;
+  color: #F7F3EA;
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  overflow-x: auto;
+  line-height: 1.65;
+  -webkit-overflow-scrolling: touch;
+}
+pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font-size: 13px;
+}
+
+.skip {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  background: var(--pink);
+  color: #111111;
+  border: 2px solid #111111;
+  padding: 10px 14px;
+  z-index: 100;
+  font-family: var(--fm);
+  font-size: 12px;
+  font-weight: 700;
+}
+.skip:focus { left: 16px; top: 16px; }
+
+.wrap {
+  width: min(var(--max), calc(100% - (var(--gutter) * 2)));
+  margin-inline: auto;
+}
+
+/* ---------- top bar ---------- */
+
+.topbar {
+  background: #111111;
+  color: #F7F3EA;
+  border-bottom: 2px solid #111111;
+  font-family: var(--fm);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.topbar .wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 18px;
+  min-height: 32px;
+  padding: 6px 0;
+}
+.topbar .dot {
+  width: 6px;
+  height: 6px;
+  background: var(--pink);
+  flex: 0 0 auto;
+}
+.topbar .dot.soft { background: #555555; }
+.topbar .soft { color: #A3A3A3; }
+
+/* ---------- header ---------- */
+
+.site-head {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: var(--bg);
+  border-bottom: 2px solid var(--line);
+}
+.head-inner {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  min-height: 68px;
+  width: min(var(--max), calc(100% - (var(--gutter) * 2)));
+  margin-inline: auto;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--ink);
+  text-decoration: none;
+  min-width: 0;
+}
+.brand:hover { color: var(--ink); }
+.brand svg { flex: 0 0 auto; display: block; }
+.brand-word {
+  font-family: var(--fh);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.05em;
+  line-height: 1;
+}
+.brand-tag {
+  font-family: var(--fm);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  background: var(--pink);
+  color: #111111;
+  border: 2px solid #111111;
+  padding: 3px 6px;
+  white-space: nowrap;
+}
+
+.head-nav {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin-left: auto;
+}
+.head-nav a {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  padding: 4px 0;
+}
+.head-nav a:hover { border-bottom-color: var(--pink); color: var(--ink); }
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 6px 10px;
+  background: var(--panel);
+  color: var(--ink);
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  font-family: var(--fm);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: transform 100ms ease, box-shadow 100ms ease;
+}
+.theme-toggle:hover { transform: translate(-1px, -1px); box-shadow: 3px 3px 0 var(--ink); }
+.theme-toggle:active { transform: translate(2px, 2px); box-shadow: 0 0 0 var(--ink); }
+.theme-toggle .glyph { font-size: 14px; line-height: 1; }
+
+/* ---------- hero ---------- */
+
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.12fr) minmax(290px, 0.88fr);
+  gap: clamp(32px, 6vw, 76px);
+  align-items: center;
+  padding: clamp(46px, 7vw, 84px) 0 clamp(38px, 5vw, 56px);
+  border-bottom: 2px solid var(--line);
+}
+
+.eyebrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 22px;
+  font-family: var(--fm);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.eyebrow .tag {
+  background: var(--pink);
+  color: #111111;
+  border: 2px solid #111111;
+  padding: 3px 7px;
+}
+.eyebrow .sep { color: var(--faint); }
+
+.hero h1 {
+  font-size: clamp(2.8rem, 6.6vw, 5.15rem);
+  line-height: 0.98;
+  letter-spacing: -0.055em;
+  margin-bottom: 24px;
+  max-width: 15ch;
+}
+.mark {
+  background: var(--pink);
+  color: #111111;
+  border: 2px solid #111111;
+  padding: 0 0.08em;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  display: inline-block;
+  transform: rotate(-1deg);
+}
+
+.lede {
+  max-width: 62ch;
+  font-size: clamp(1rem, 1.35vw, 1.12rem);
+  line-height: 1.65;
+  color: var(--muted);
+  margin-bottom: 26px;
+}
+.lede strong { color: var(--ink); font-weight: 600; }
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 28px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 8px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: 2px;
+  box-shadow: 2px 2px 0 var(--ink);
+  font-family: var(--fm);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.actions { display: flex; flex-wrap: wrap; gap: 12px; }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 9px 17px;
+  background: var(--pink);
+  color: #111111;
+  border: 2px solid #111111;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  font-family: var(--fm);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  text-decoration: none;
+  transition: transform 100ms ease, box-shadow 100ms ease;
+}
+.btn:hover { background: var(--pink); color: #111111; transform: translate(-2px, -2px); box-shadow: var(--shadow-lg); }
+.btn:active { transform: translate(3px, 3px); box-shadow: 0 0 0 #111111; }
+.btn.ghost { background: var(--panel); color: var(--ink); border-color: var(--line); }
+.btn.ghost:hover { background: var(--panel); color: var(--ink); }
+
+.hero-plate {
+  margin: 0;
+  position: relative;
+  justify-self: center;
+  width: min(100%, 420px);
+}
+.plate {
+  position: relative;
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  background: var(--cream);
+  overflow: hidden;
+}
+.plate img { display: block; width: 100%; aspect-ratio: 1 / 1; object-fit: cover; }
+.sticker {
+  position: absolute;
+  top: -14px;
+  right: -12px;
+  z-index: 2;
+  background: var(--pink);
+  color: #111111;
+  border: 2px solid #111111;
+  box-shadow: 2px 2px 0 #111111;
+  padding: 5px 8px;
+  font-family: var(--fm);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  transform: rotate(3deg);
+  white-space: nowrap;
+}
+.hero-plate figcaption {
+  margin-top: 14px;
+  font-family: var(--fm);
+  font-size: 9.5px;
+  line-height: 1.6;
+  color: var(--faint);
+  letter-spacing: 0.02em;
+}
+
+/* ---------- notice ---------- */
+
+.notice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  margin: 26px 0 0;
+  padding: 16px 18px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.stamp {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;
+  min-height: 28px;
+  padding: 3px 7px;
+  background: var(--pink);
+  color: #111111;
+  border: 2px solid #111111;
+  font-family: var(--fm);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+.notice strong { color: var(--ink); font-weight: 600; }
+
+/* ---------- shell / toc ---------- */
+
+.shell {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: clamp(32px, 5vw, 64px);
+  padding: clamp(40px, 6vw, 64px) 0 76px;
+  align-items: start;
+}
+
+.toc {
+  position: sticky;
+  top: 96px;
+  font-size: 12px;
+}
+.toc-title {
+  margin: 0 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid var(--line);
+  font-family: var(--fm);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.toc ol { list-style: none; margin: 0; padding: 0; }
+.toc li { margin: 0; }
+.toc a {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 7px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--muted);
+  text-decoration: none;
+  line-height: 1.4;
+}
+.toc a:hover { color: var(--ink); }
+.toc .n { font-family: var(--fm); font-size: 9px; font-weight: 700; color: var(--pink-ink); padding-top: 2px; }
+
+.mobile-toc { display: none; }
+
+.prose { min-width: 0; max-width: 760px; }
+
+.section {
+  padding: 0 0 48px;
+  margin: 0 0 48px;
+  border-bottom: 2px solid var(--line);
+  scroll-margin-top: 86px;
+}
+.section:last-of-type { border-bottom: 0; margin-bottom: 0; }
+
+.section-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 22px;
+}
+.sec-num {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  background: var(--pink);
+  color: #111111;
+  border: 2px solid #111111;
+  box-shadow: 3px 3px 0 #111111;
+  font-family: var(--fh);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.section h2 {
+  font-size: clamp(1.75rem, 3vw, 2.25rem);
+  letter-spacing: -0.04em;
+}
+.section h3 {
+  font-size: 1.06rem;
+  margin: 30px 0 8px;
+  letter-spacing: -0.02em;
+}
+.section h3:first-child { margin-top: 0; }
+.section p { color: var(--muted); }
+.section p strong { color: var(--ink); font-weight: 600; }
+.section ul, .section ol { color: var(--muted); padding-left: 1.25em; margin: 0 0 1em; }
+.section li { margin: 0 0 0.5em; }
+.section li::marker { color: var(--pink-ink); }
+.section li strong { color: var(--ink); font-weight: 600; }
+
+.grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  margin: 26px 0 8px;
+}
+.card {
+  min-width: 0;
+  padding: 17px 16px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+.card h3 { font-size: 0.98rem; margin: 0 0 8px; }
+.card p { font-size: 13px; line-height: 1.55; margin: 0; }
+
+.note {
+  margin: 24px 0;
+  padding: 16px 18px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-left: 10px solid var(--pink);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--ink);
+}
+.note strong {
+  display: block;
+  margin-bottom: 4px;
+  font-family: var(--fh);
+  font-size: 14px;
+  letter-spacing: -0.01em;
+}
+.note p { color: var(--muted); margin: 0; }
+.note.blue { border-left-color: var(--blue); }
+.note.blue strong { color: var(--blue); }
+
+/* ---------- tables ---------- */
+
+.table-wrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 24px 0;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  -webkit-overflow-scrolling: touch;
+}
+table {
+  width: 100%;
+  min-width: 620px;
+  border-collapse: collapse;
+  font-size: 13px;
+  line-height: 1.5;
+}
+caption {
+  text-align: left;
+  padding: 11px 14px;
+  border-bottom: 2px solid var(--line);
+  background: var(--panel-alt);
+  font-family: var(--fm);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+th {
+  padding: 10px 12px;
+  text-align: left;
+  background: var(--panel-alt);
+  border-bottom: 2px solid var(--line);
+  font-family: var(--fm);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink);
+  vertical-align: bottom;
+}
+td {
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  vertical-align: top;
+  color: var(--muted);
+}
+tr:last-child td { border-bottom: 0; }
+td strong { color: var(--ink); font-weight: 600; }
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 6px;
+  border: 1.5px solid var(--line);
+  border-radius: 2px;
+  background: var(--panel);
+  font-family: var(--fm);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--ink);
+}
+.badge.ok { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.badge.partial { background: var(--pink-soft); border-color: var(--pink-ink); color: var(--pink-ink); }
+.badge.no { background: var(--panel-alt); border-color: var(--line-soft); color: var(--faint); }
+
+/* ---------- architecture ---------- */
+
+.figure { margin: 26px 0 8px; padding: 0; }
+.figure-cap {
+  margin-top: 12px;
+  font-family: var(--fm);
+  font-size: 9.5px;
+  line-height: 1.65;
+  color: var(--faint);
+}
+.figure-cap strong { color: var(--muted); }
+
+.arch {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px minmax(0, 1.25fr) 30px minmax(0, 1fr);
+  gap: 10px;
+  align-items: stretch;
+  padding: 18px;
+  background: var(--panel-alt);
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.arch-col { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+.arch-label {
+  font-family: var(--fm);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.arch-box {
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: 2px;
+  box-shadow: var(--shadow-sm);
+  padding: 10px 11px;
+  min-width: 0;
+}
+.arch-box strong { display: block; font-family: var(--fh); font-size: 12.5px; font-weight: 700; line-height: 1.25; color: var(--ink); }
+.arch-box span { display: block; font-size: 10.5px; line-height: 1.45; color: var(--muted); margin-top: 3px; }
+.arch-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--fm);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--pink-ink);
+}
+
+/* ---------- state machine ---------- */
+
+.state-machine {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 90px minmax(0, 1fr);
+  gap: 10px;
+  align-items: stretch;
+  margin: 26px 0 8px;
+}
+.state {
+  min-width: 0;
+  padding: 18px 16px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+.state.sealed { border-top: 10px solid var(--pink); }
+.state.unsealed { border-top: 10px solid var(--blue); }
+.state .k {
+  display: block;
+  font-family: var(--fm);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--faint);
+  margin-bottom: 6px;
+}
+.state h3 { font-size: 1.25rem; margin: 0 0 7px; }
+.state p { font-size: 12px; line-height: 1.55; margin: 0 0 10px; }
+.state code { font-size: 10px; }
+.state-arrows {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+  font-family: var(--fm);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  text-align: center;
+}
+.state-arrows span { display: block; padding: 4px 0; border-bottom: 1px solid var(--line-soft); }
+.state-arrows span:last-child { border-bottom: 0; }
+
+/* ---------- steps ---------- */
+
+.steps { list-style: none; margin: 24px 0 0; padding: 0; }
+.steps li {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 14px;
+  padding: 14px 0;
+  margin: 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.steps li:last-child { border-bottom: 0; }
+.step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  background: var(--pink);
+  color: #111111;
+  border: 2px solid #111111;
+  box-shadow: 2px 2px 0 #111111;
+  font-family: var(--fm);
+  font-size: 11px;
+  font-weight: 700;
+}
+.steps strong { display: block; font-family: var(--fh); font-size: 13.5px; color: var(--ink); margin-bottom: 2px; }
+.steps p { font-size: 13px; line-height: 1.55; margin: 0; }
+
+/* ---------- formula ---------- */
+
+.formula {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 20px;
+  margin: 22px 0;
+  padding: 16px 18px;
+  background: var(--panel-alt);
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+.formula .k {
+  font-family: var(--fm);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.formula code {
+  background: var(--panel);
+  border: 2px solid var(--line);
+  padding: 5px 9px;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+/* ---------- horizontal flow ---------- */
+
+.flow-h {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 24px;
+  margin: 26px 0 0;
+  padding: 0;
+}
+.flow-h li {
+  position: relative;
+  margin: 0;
+  padding: 13px 12px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  min-width: 0;
+}
+.flow-h li:not(:last-child)::after {
+  content: "→";
+  position: absolute;
+  right: -19px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: var(--fm);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--pink-ink);
+}
+.flow-h .fn {
+  display: block;
+  font-family: var(--fm);
+  font-size: 8.5px;
+  font-weight: 700;
+  color: var(--pink-ink);
+  margin-bottom: 5px;
+}
+.flow-h strong { display: block; font-family: var(--fh); font-size: 12.5px; line-height: 1.25; margin-bottom: 4px; }
+.flow-h p { font-size: 10.5px; line-height: 1.45; margin: 0; color: var(--muted); }
+
+/* ---------- findings ---------- */
+
+.findings {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin: 24px 0 0;
+}
+.finding {
+  min-width: 0;
+  padding: 16px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+.finding .fid {
+  display: inline-block;
+  margin-bottom: 7px;
+  padding: 2px 6px;
+  background: var(--panel-alt);
+  border: 1.5px solid var(--line);
+  font-family: var(--fm);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--pink-ink);
+}
+.finding h3 { font-size: 0.98rem; margin: 0 0 8px; }
+.finding p { font-size: 12.5px; line-height: 1.55; margin: 0 0 8px; color: var(--muted); }
+.finding p:last-child { margin-bottom: 0; }
+.lbl {
+  display: block;
+  font-family: var(--fm);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--pink-ink);
+  margin-bottom: 1px;
+}
+
+/* ---------- scope ---------- */
+
+.cols {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  margin: 22px 0;
+}
+.cols > div { min-width: 0; }
+.cols h3 { margin: 0 0 10px; }
+.checklist { list-style: none; padding: 0; margin: 0; }
+.checklist li {
+  position: relative;
+  padding: 8px 0 8px 26px;
+  margin: 0;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.checklist li::before {
+  position: absolute;
+  left: 0;
+  top: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border: 1.5px solid currentColor;
+  font-family: var(--fm);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--blue);
+  content: "+";
+}
+.checklist.no li::before { color: var(--faint); content: "−"; }
+
+.limits { counter-reset: lim; list-style: none; padding: 0; margin: 18px 0 0; }
+.limits li {
+  counter-increment: lim;
+  position: relative;
+  padding: 11px 0 11px 38px;
+  margin: 0;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.limits li::before {
+  content: counter(lim, decimal-leading-zero);
+  position: absolute;
+  left: 0;
+  top: 12px;
+  font-family: var(--fm);
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--pink-ink);
+}
+
+/* ---------- proof ---------- */
+
+.proof-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  margin: 24px 0;
+}
+.proof-card {
+  min-width: 0;
+  padding: 15px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+.proof-card .k {
+  display: block;
+  font-family: var(--fm);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--pink-ink);
+  margin-bottom: 6px;
+}
+.proof-card strong { display: block; font-family: var(--fh); font-size: 13px; line-height: 1.3; margin-bottom: 4px; }
+.proof-card p { font-size: 11.5px; line-height: 1.5; margin: 0; }
+
+.summary-box {
+  margin: 24px 0 0;
+  padding: 20px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.summary-box p { font-size: 14.5px; line-height: 1.7; }
+
+.byline {
+  margin-top: 10px;
+  padding: 20px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+.byline p { font-size: 13px; margin: 0 0 8px; }
+.byline p:last-child { margin-bottom: 0; }
+.byline strong { color: var(--ink); }
+
+.top-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 24px;
+  padding: 6px 10px;
+  border: 2px solid var(--line);
+  box-shadow: var(--shadow-sm);
+  background: var(--panel);
+  font-family: var(--fm);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-decoration: none;
+  color: var(--ink);
+}
+.top-link:hover { background: var(--pink); color: #111111; }
+
+/* ---------- footer ---------- */
+
+footer {
+  border-top: 2px solid var(--line);
+  padding: 26px 0 38px;
+  font-family: var(--fm);
+  font-size: 9.5px;
+  line-height: 1.6;
+  color: var(--faint);
+}
+.foot-inner {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px 30px;
+}
+.foot-inner p { margin: 0; }
+.foot-links { display: flex; flex-wrap: wrap; gap: 18px; }
+.foot-links a { color: var(--muted); text-decoration: none; }
+.foot-links a:hover { color: var(--pink-ink); text-decoration: underline; }
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 1000px) {
+  .hero { grid-template-columns: minmax(0, 1fr); }
+  .hero h1 { max-width: 18ch; }
+  .hero-plate { justify-self: start; }
+  .shell { grid-template-columns: minmax(0, 1fr); }
+  .toc { display: none; }
+  .mobile-toc {
+    display: block;
+    margin-bottom: 34px;
+    background: var(--panel);
+    border: 2px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+  }
+  .mobile-toc summary {
+    cursor: pointer;
+    padding: 12px 14px;
+    font-family: var(--fm);
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink);
+    list-style: none;
+  }
+  .mobile-toc summary::-webkit-details-marker { display: none; }
+  .mobile-toc summary::after { content: "+"; float: right; color: var(--pink-ink); }
+  .mobile-toc[open] summary::after { content: "−"; }
+  .mobile-toc ol { list-style: none; margin: 0; padding: 0 14px 10px; }
+  .mobile-toc a {
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr);
+    gap: 7px;
+    padding: 7px 0;
+    border-top: 1px solid var(--line-soft);
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 12px;
+  }
+  .mobile-toc .n { font-family: var(--fm); font-size: 9px; font-weight: 700; color: var(--pink-ink); }
+  .prose { max-width: 100%; }
+  .head-nav { display: none; }
+  .theme-toggle { margin-left: auto; }
+}
+
+@media (max-width: 820px) {
+  .arch { grid-template-columns: minmax(0, 1fr); }
+  .arch-arrow { transform: rotate(90deg); padding: 2px 0; }
+  .state-machine { grid-template-columns: minmax(0, 1fr); }
+  .state-arrows { flex-direction: row; flex-wrap: wrap; justify-content: center; }
+  .state-arrows span { border-bottom: 0; }
+  .flow-h { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .flow-h li:not(:last-child)::after { content: "↓"; right: 12px; top: auto; bottom: -16px; transform: none; }
+  .grid-3 { grid-template-columns: minmax(0, 1fr); }
+  .findings { grid-template-columns: minmax(0, 1fr); }
+  .cols { grid-template-columns: minmax(0, 1fr); }
+  .proof-strip { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 620px) {
+  .brand-tag { display: none; }
+  .topbar .soft, .topbar .dot.soft { display: none; }
+  .hero { padding-top: 38px; }
+  .hero h1 { font-size: clamp(2.35rem, 11.5vw, 3.1rem); }
+  .hero-plate { width: 100%; max-width: 360px; }
+  .sticker { top: 10px; right: 10px; }
+  .notice { grid-template-columns: minmax(0, 1fr); gap: 9px; }
+  .stamp { justify-self: start; }
+  .section { padding-bottom: 36px; margin-bottom: 36px; }
+  .section-head { gap: 11px; }
+  .sec-num { width: 34px; height: 34px; font-size: 12px; }
+  .theme-toggle { min-width: 44px; min-height: 44px; padding: 0; }
+  .theme-toggle .label { display: none; }
+  .chips { gap: 7px; }
+  .chip { font-size: 8.5px; }
+  .byline, .summary-box { padding: 16px; }
+  .foot-inner { flex-direction: column; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
+
+@media print {
+  .topbar, .site-head, .toc, .mobile-toc, .actions, .theme-toggle, .top-link { display: none !important; }
+  body { background: #FFFFFF; color: #000000; font-size: 11pt; }
+  .shell { display: block; padding: 0; }
+  .section { break-inside: avoid; }
+  .hero { display: block; }
+  .hero-plate { max-width: 260px; }
+  .plate, .card, .note, .table-wrap, .summary-box, .byline { box-shadow: none; }
+  a { color: #000000; }
+}
+</style>
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<div class="topbar">
+  <div class="wrap">
+    <span>LinkPass publication</span>
+    <span class="dot" aria-hidden="true"></span>
+    <span>Documentation, not a sales page</span>
+    <span class="dot soft" aria-hidden="true"></span>
+    <span class="soft">No phrases, keys, or credentials published</span>
+  </div>
+</div>
+
+<header class="site-head">
+  <div class="head-inner">
+    <a class="brand" href="#top" aria-label="LinkPass publication, back to top">
+      <svg width="44" height="32" viewBox="0 0 32 24" fill="none" aria-hidden="true">
+        <circle cx="11" cy="12" r="8" stroke="currentColor" stroke-width="2"/>
+        <circle cx="21" cy="12" r="8" stroke="currentColor" stroke-width="2"/>
+      </svg>
+      <span class="brand-word">linkpass</span>
+      <span class="brand-tag">Publication</span>
+    </a>
+
+    <nav class="head-nav" aria-label="Publication sections">
+      <a href="#built">Build</a>
+      <a href="#seal">Seal</a>
+      <a href="#boundaries">Boundaries</a>
+      <a href="#evidence">Evidence</a>
+    </nav>
+
+    <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch to dark theme" aria-pressed="false">
+      <span class="glyph" aria-hidden="true">☾</span>
+      <span class="label">Dark</span>
+    </button>
+  </div>
+</header>
+
+<main id="main">
+  <div class="wrap" id="top">
+
+    <section class="hero" aria-labelledby="hero-title">
+      <div>
+        <p class="eyebrow">
+          <span class="tag">Publication</span>
+          <span>Reviewed 20 October 2026</span>
+        </p>
+
+        <h1 id="hero-title">A team vault that can be <span class="mark">sealed.</span></h1>
+
+        <p class="lede">
+          LinkPass is an enterprise password manager built around a HashiCorp-inspired
+          <strong>seal / unseal lifecycle</strong>: AES-256-GCM at rest, a 12-word master phrase,
+          mandatory TOTP, role-based access, quorum-controlled export, and a browser extension that
+          only injects a credential after an admin approves the request. This page documents the
+          build, the boundaries, and the evidence.
+        </p>
+
+        <div class="chips" aria-label="Technical summary">
+          <span class="chip">AES-256-GCM</span>
+          <span class="chip">PBKDF2 · 600k</span>
+          <span class="chip">12-word phrase</span>
+          <span class="chip">TOTP</span>
+          <span class="chip">Quorum export</span>
+          <span class="chip">MV3 extension</span>
+        </div>
+
+        <div class="actions">
+          <a class="btn" href="#context">Read the record</a>
+          <a class="btn ghost" href="#evidence">See the evidence</a>
+        </div>
+      </div>
+
+      <figure class="hero-plate">
+        <span class="sticker" aria-hidden="true">Seal / Unseal</span>
+        <div class="plate">
+          <img src="assets/brand-linkpass.jpg" width="900" height="900"
+               alt="LinkPass brand mark: two overlapping black circles above the lowercase word linkpass, on a cream paper-textured square.">
+        </div>
+        <figcaption>Official LinkPass brand mark. Paper field, two overlapping circles, lowercase wordmark.</figcaption>
+      </figure>
+    </section>
+
+    <div class="notice">
+      <span class="stamp" aria-hidden="true">NOTE</span>
+      <p>
+        <strong>This page publishes method and architecture, not secrets.</strong>
+        It contains no master phrase, JWT secret, license key, salt file, credential, or customer
+        record. Statements are scoped to the source reviewed above. The repository is private;
+        paths are cited as evidence, not linked.
+      </p>
+    </div>
+
+    <div class="shell">
+      <nav class="toc" aria-label="Contents">
+        <p class="toc-title">Contents</p>
+        <ol>
+          <li><a href="#context"><span class="n">01</span> Context</a></li>
+          <li><a href="#built"><span class="n">02</span> What was built</a></li>
+          <li><a href="#architecture"><span class="n">03</span> Architecture</a></li>
+          <li><a href="#seal"><span class="n">04</span> Seal / unseal</a></li>
+          <li><a href="#access"><span class="n">05</span> Access &amp; quorum</a></li>
+          <li><a href="#extension"><span class="n">06</span> Extension</a></li>
+          <li><a href="#boundaries"><span class="n">07</span> Boundaries</a></li>
+          <li><a href="#findings"><span class="n">08</span> Findings</a></li>
+          <li><a href="#limits"><span class="n">09</span> Scope &amp; limits</a></li>
+          <li><a href="#evidence"><span class="n">10</span> Evidence</a></li>
+          <li><a href="#summary"><span class="n">11</span> Summary</a></li>
+          <li><a href="#authors"><span class="n">12</span> Authors</a></li>
+        </ol>
+      </nav>
+
+      <article class="prose">
+
+        <details class="mobile-toc">
+          <summary>Contents</summary>
+          <ol>
+            <li><a href="#context"><span class="n">01</span> Context</a></li>
+            <li><a href="#built"><span class="n">02</span> What was built</a></li>
+            <li><a href="#architecture"><span class="n">03</span> Architecture</a></li>
+            <li><a href="#seal"><span class="n">04</span> Seal / unseal</a></li>
+            <li><a href="#access"><span class="n">05</span> Access &amp; quorum</a></li>
+            <li><a href="#extension"><span class="n">06</span> Extension</a></li>
+            <li><a href="#boundaries"><span class="n">07</span> Boundaries</a></li>
+            <li><a href="#findings"><span class="n">08</span> Findings</a></li>
+            <li><a href="#limits"><span class="n">09</span> Scope &amp; limits</a></li>
+            <li><a href="#evidence"><span class="n">10</span> Evidence</a></li>
+            <li><a href="#summary"><span class="n">11</span> Summary</a></li>
+            <li><a href="#authors"><span class="n">12</span> Authors</a></li>
+          </ol>
+        </details>
+
+        <section class="section" id="context">
+          <div class="section-head">
+            <span class="sec-num">01</span>
+            <h2>Context</h2>
+          </div>
+
+          <p>
+            Team credentials usually live in the worst place that works: a shared spreadsheet, a
+            chat thread, or a note taped to a monitor. They are convenient until someone leaves, a
+            laptop is lost, or an auditor asks who read the production database password last month.
+          </p>
+
+          <div class="grid-3">
+            <div class="card">
+              <h3>Sharing has no perimeter</h3>
+              <p>
+                A password pasted into chat is copied into devices, backups, and notification
+                previews. Revoking access means chasing every copy.
+              </p>
+            </div>
+            <div class="card">
+              <h3>Access is not observable</h3>
+              <p>
+                A spreadsheet cannot show who revealed a secret, when, or from which address.
+                Offboarding is a hope, not a control.
+              </p>
+            </div>
+            <div class="card">
+              <h3>Consumer vaults do not fit teams</h3>
+              <p>
+                Personal password managers optimize for one person. They do not model teams,
+                quorum approvals, or an administrator who can export the whole organization.
+              </p>
+            </div>
+          </div>
+
+          <p style="margin-top:24px">
+            LinkPass’s design goal was to make the root of trust explicit. The vault starts
+            <strong>sealed</strong>, the key exists only while the process is running, and the
+            highest-risk operation — exporting every credential — requires more than one
+            administrator. The rest of the system is organized around that decision.
+          </p>
+        </section>
+
+        <section class="section" id="built">
+          <div class="section-head">
+            <span class="sec-num">02</span>
+            <h2>What was built</h2>
+          </div>
+
+          <p>
+            LinkPass is a single-organization vault with a FastAPI backend and a dependency-free
+            web client. The table is the functional inventory; the sections that follow cover the
+            parts where the security model actually lives.
+          </p>
+
+          <div class="table-wrap">
+            <table>
+              <caption>Functional inventory as observed in the reviewed source.</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Area</th>
+                  <th scope="col">Capability</th>
+                  <th scope="col">State</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>Vault</strong></td>
+                  <td>Team-scoped credential storage with private, team-only, selected-team, and organization-wide visibility.</td>
+                  <td><span class="badge ok">● Implemented</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Encryption</strong></td>
+                  <td>AES-256-GCM at rest with a per-secret nonce; the key is derived at unseal and held only in process memory.</td>
+                  <td><span class="badge ok">● Implemented</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Seal / unseal</strong></td>
+                  <td>BIP-39 12-word phrase, PBKDF2-HMAC-SHA256 at 600,000 iterations, a 16-byte salt file, and a global 423 gate while sealed.</td>
+                  <td><span class="badge ok">● Implemented</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Authentication</strong></td>
+                  <td>Bcrypt password hashes, JWT sessions, mandatory TOTP enrollment, 3-attempt lockout, and 30-day password rotation prompts.</td>
+                  <td><span class="badge ok">● Implemented</span></td>
+                </tr>
+                <tr>
+                  <td><strong>RBAC</strong></td>
+                  <td><code>org_admin</code>, <code>team_admin</code>, and <code>member</code> roles with team-scoped management.</td>
+                  <td><span class="badge ok">● Implemented</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Sharing</strong></td>
+                  <td>Permanent team shares plus time-bound user shares with an expiry and a per-share clipboard TTL.</td>
+                  <td><span class="badge ok">● Implemented</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Quorum export</strong></td>
+                  <td>Organization-wide export requires valid PINs from a majority of org admins; the export is encrypted with a one-time password.</td>
+                  <td><span class="badge ok">● Implemented</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Audit</strong></td>
+                  <td>Append-only event records with a 90-day retention window, purged on new log creation.</td>
+                  <td><span class="badge ok">● Implemented</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Extension</strong></td>
+                  <td>Manifest V3 injector plus request / approve / reject / poll API. The admin approval screen is incomplete in this build.</td>
+                  <td><span class="badge partial">◐ Partial</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Deployment</strong></td>
+                  <td>Docker Compose with TLS and a bundled web client; PyInstaller specs for a standalone server build.</td>
+                  <td><span class="badge ok">● Implemented</span></td>
+                </tr>
+                <tr>
+                  <td><strong>PostgreSQL runtime</strong></td>
+                  <td>Compose provisions PostgreSQL, but the SQLAlchemy engine still points at SQLite.</td>
+                  <td><span class="badge partial">◐ Partial</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Out of scope</strong></td>
+                  <td>High availability, HSM/KMS integration, SSO/SCIM, mobile apps, and formal certification.</td>
+                  <td><span class="badge no">○ Not claimed</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="note blue">
+            <strong>One organization, one vault</strong>
+            <p>
+              LinkPass is not a multi-tenant service. The deployment assumes one organization owns
+              the server, the database, the TLS material, and the master phrase. That assumption is
+              part of the security model, not a missing feature.
+            </p>
+          </div>
+        </section>
+
+        <section class="section" id="architecture">
+          <div class="section-head">
+            <span class="sec-num">03</span>
+            <h2>Architecture</h2>
+          </div>
+
+          <p>
+            The backend is an asynchronous FastAPI application. The web client is a vanilla
+            JavaScript single-page app served as static files. SQLAlchemy is the only path to the
+            store. The browser extension is a separate Manifest V3 package that talks to the same
+            API with a stored token.
+          </p>
+
+          <figure class="figure">
+            <div class="arch" role="img" aria-label="Architecture diagram: a vanilla JavaScript client and an MV3 extension call a FastAPI backend containing auth, vault, admin, and extension routers, with SQLAlchemy over SQLite, a license middleware, and the in-memory master key derived from the unseal phrase.">
+              <div class="arch-col">
+                <span class="arch-label">Clients</span>
+                <div class="arch-box">
+                  <strong>Web SPA</strong>
+                  <span>Vanilla JS · hash router · vault, admin, audit</span>
+                </div>
+                <div class="arch-box">
+                  <strong>MV3 extension</strong>
+                  <span>Content script · service worker · popup</span>
+                </div>
+                <div class="arch-box">
+                  <strong>Desktop client</strong>
+                  <span>Python UI · API client</span>
+                </div>
+              </div>
+
+              <div class="arch-arrow" aria-hidden="true">→</div>
+
+              <div class="arch-col">
+                <span class="arch-label">Application</span>
+                <div class="arch-box">
+                  <strong>FastAPI</strong>
+                  <span>Auth · passwords · admin · extension routers</span>
+                </div>
+                <div class="arch-box">
+                  <strong>Seal middleware</strong>
+                  <span>423 for every route outside the unseal allowlist</span>
+                </div>
+                <div class="arch-box">
+                  <strong>License middleware</strong>
+                  <span>RS256 · issuer <code>LinkPass-KeyGen</code></span>
+                </div>
+                <div class="arch-box">
+                  <strong>In-memory key</strong>
+                  <span>AES-GCM context derived from the phrase</span>
+                </div>
+              </div>
+
+              <div class="arch-arrow" aria-hidden="true">→</div>
+
+              <div class="arch-col">
+                <span class="arch-label">State &amp; inputs</span>
+                <div class="arch-box">
+                  <strong>SQLite via SQLAlchemy</strong>
+                  <span>Users · teams · credentials · audit · extension requests</span>
+                </div>
+                <div class="arch-box">
+                  <strong>16-byte salt file</strong>
+                  <span>PBKDF2 salt; not the key</span>
+                </div>
+                <div class="arch-box">
+                  <strong>License public key</strong>
+                  <span>RS256 verification material</span>
+                </div>
+              </div>
+            </div>
+            <figcaption class="figure-cap">
+              <strong>Figure 1.</strong> Runtime shape. The compose file provisions PostgreSQL, but
+              the engine in <code>server/database.py</code> still hardcodes SQLite; the current
+              build runs on SQLite.
+            </figcaption>
+          </figure>
+
+          <h3>Why this shape</h3>
+          <ul>
+            <li><strong>The vault is sealed before authorization.</strong> The seal middleware runs before route handlers, so a sealed process cannot serve vault data even to a valid token.</li>
+            <li><strong>The key is not a file.</strong> The master key is derived at unseal and stored in module globals; a restart clears it and returns the process to the sealed state.</li>
+            <li><strong>Export is treated as a separate risk.</strong> Reading one credential and exporting every credential are different operations, with different authorization requirements.</li>
+          </ul>
+        </section>
+
+        <section class="section" id="seal">
+          <div class="section-head">
+            <span class="sec-num">04</span>
+            <h2>Seal / unseal lifecycle</h2>
+          </div>
+
+          <p>
+            The seal is the central design decision. On a fresh install, LinkPass generates a
+            12-word BIP-39 phrase, derives a 256-bit key with PBKDF2-HMAC-SHA256, and holds that key
+            in memory. On the next process start, the key is gone. The vault is sealed until an
+            operator supplies the phrase again.
+          </p>
+
+          <div class="state-machine" role="img" aria-label="State diagram: the vault starts sealed and returns 423 Locked; submitting the valid 12-word phrase derives the key and moves it to unsealed; a process restart or manual seal returns it to sealed.">
+            <div class="state sealed">
+              <span class="k">State A</span>
+              <h3>Sealed</h3>
+              <p>The key is absent from memory. Every route outside the unseal allowlist returns <code>423 Locked</code>.</p>
+              <code>POST /api/system/unseal</code>
+            </div>
+            <div class="state-arrows" aria-hidden="true">
+              <span>Phrase verified →</span>
+              <span>← Restart / seal</span>
+            </div>
+            <div class="state unsealed">
+              <span class="k">State B</span>
+              <h3>Unsealed</h3>
+              <p>The derived key lives in process memory. Authenticated routes can encrypt and decrypt vault records.</p>
+              <code>GET /api/system/status</code>
+            </div>
+          </div>
+          <p class="figure-cap" style="margin-top:10px">
+            <strong>Figure 2.</strong> The sealed / unsealed state machine. The phrase is the only
+            input that moves the system from A to B.
+          </p>
+
+          <ol class="steps">
+            <li>
+              <span class="step-num">1</span>
+              <div>
+                <strong>First boot creates the root of trust</strong>
+                <p>If no salt file exists, the server generates a 16-byte salt and a 128-bit BIP-39 mnemonic, derives the key, and prints the phrase once to the process output.</p>
+              </div>
+            </li>
+            <li>
+              <span class="step-num">2</span>
+              <div>
+                <strong>The key is derived, not stored</strong>
+                <p>PBKDF2-HMAC-SHA256 with 600,000 iterations produces a 32-byte key. The salt is on disk; the key is only in memory.</p>
+              </div>
+            </li>
+            <li>
+              <span class="step-num">3</span>
+              <div>
+                <strong>A restart re-seals the vault</strong>
+                <p>When the process stops, the key is lost. The next start serves <code>423</code> until an operator unseals it.</p>
+              </div>
+            </li>
+            <li>
+              <span class="step-num">4</span>
+              <div>
+                <strong>The phrase is the recovery boundary</strong>
+                <p>There is no key escrow and no reset path. A lost phrase means the stored credentials cannot be decrypted.</p>
+              </div>
+            </li>
+            <li>
+              <span class="step-num">5</span>
+              <div>
+                <strong>Legacy key files are removed</strong>
+                <p>On a fresh install, a previous <code>.master_key</code> file is deleted. The current design has no on-disk master key.</p>
+              </div>
+            </li>
+          </ol>
+
+          <div class="note">
+            <strong>The availability trade-off is deliberate</strong>
+            <p>
+              A sealed vault is unavailable by design. An operator must hold the phrase and be
+              available after a restart. This is the cost of removing a persistent key file; it is
+              not an accident in the deployment.
+            </p>
+          </div>
+        </section>
+
+        <section class="section" id="access">
+          <div class="section-head">
+            <span class="sec-num">05</span>
+            <h2>Access &amp; quorum</h2>
+          </div>
+
+          <p>
+            Authorization is role-based at the organization and team level, then narrowed by the
+            visibility of each credential. The highest-risk operation is a full export, which adds a
+            quorum requirement on top of the org-admin role.
+          </p>
+
+          <div class="table-wrap">
+            <table>
+              <caption>Access tiers and the operations they unlock.</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Role</th>
+                  <th scope="col">Scope</th>
+                  <th scope="col">Notable operations</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>org_admin</strong></td>
+                  <td>Organization</td>
+                  <td>User management, audit log, extension approvals, full export with quorum PINs.</td>
+                </tr>
+                <tr>
+                  <td><strong>team_admin</strong></td>
+                  <td>Own team</td>
+                  <td>Team membership and team-scoped credential sharing; no organization export.</td>
+                </tr>
+                <tr>
+                  <td><strong>member</strong></td>
+                  <td>Own credentials and shared teams</td>
+                  <td>Create and reveal permitted credentials; no admin views.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <p>
+            Each credential carries a visibility value:
+            <code>private_to_owner</code>, <code>team_only</code>,
+            <code>shared_with_specific_teams</code>, or <code>org_wide</code>. A time-bound user
+            share adds <code>expires_at</code> and <code>clipboard_ttl_seconds</code>; expired shares
+            are filtered out when the vault list is built, not by a background cleanup job.
+          </p>
+
+          <h3>The export quorum</h3>
+          <p>
+            A full export is not a normal read. The API counts the organization admins, calculates
+            a majority, and verifies a unique PIN for each supplied admin. Duplicate usernames are
+            ignored. The export is then encrypted with a random one-time password and returned with
+            that password.
+          </p>
+
+          <div class="formula">
+            <span class="k">Required admin PINs</span>
+            <code>max(1, (org_admins + 1) // 2)</code>
+          </div>
+
+          <p>
+            The encrypted blob is assembled as <code>salt + nonce + ciphertext</code> and encoded in
+            base64. The one-time password is shown once; it is not stored. The export action itself
+            is written to the audit log.
+          </p>
+
+          <div class="note blue">
+            <strong>Quorum is an approval control, not key splitting</strong>
+            <p>
+              The PINs authorize the export; they do not reconstruct the vault key. An operator who
+              already holds the master phrase and database access is outside this control. The
+              quorum protects the normal application path, not a hostile administrator with host
+              access.
+            </p>
+          </div>
+        </section>
+
+        <section class="section" id="extension">
+          <div class="section-head">
+            <span class="sec-num">06</span>
+            <h2>Browser extension</h2>
+          </div>
+
+          <p>
+            The extension exists to avoid putting a password on the OS clipboard. It asks the server
+            for access to the current site, waits for an admin decision, and injects the approved
+            value directly into the page.
+          </p>
+
+          <ol class="flow-h" aria-label="Extension request flow">
+            <li><span class="fn">01</span><strong>Request</strong><p>The content script posts the target URL with its stored token.</p></li>
+            <li><span class="fn">02</span><strong>Review</strong><p>An admin sees the pending request and selects a credential.</p></li>
+            <li><span class="fn">03</span><strong>Approve</strong><p>The admin completes a 2FA step before the payload is pushed.</p></li>
+            <li><span class="fn">04</span><strong>Poll</strong><p>The service worker polls every two seconds for up to 60 seconds.</p></li>
+            <li><span class="fn">05</span><strong>Consume</strong><p>The payload is marked consumed; a second poll cannot replay it.</p></li>
+          </ol>
+
+          <h3>The four-layer injection defense</h3>
+          <ul>
+            <li><strong>Closed shadow DOM.</strong> The “LinkPass” button is rendered inside a closed shadow root so page CSS and scripts cannot select or restyle it.</li>
+            <li><strong>Attribute check.</strong> Before injection, the script confirms the target is still a password or text input.</li>
+            <li><strong>Instant submission.</strong> The value is written to the field, input and change events are dispatched, and the closest form is submitted.</li>
+            <li><strong>Auto-clear.</strong> The field is wiped 500 milliseconds after submission.</li>
+          </ul>
+
+          <div class="note">
+            <strong>The injection surface is broader than the control</strong>
+            <p>
+              The extension declares <code>&lt;all_urls&gt;</code> and attaches to the first password
+              field on every page. The closed shadow root protects the button, not the value after
+              it enters the page. A page script can observe the field between injection and the
+              500 ms clear. This is a documented residual risk, not a solved problem.
+            </p>
+          </div>
+
+          <p>
+            The backend is complete: request, list, approve, reject, and one-shot poll. The web
+            client’s sidebar exposes an “Extension Requests” link, but no render route is registered
+            for it in the reviewed build. That makes the extension path <strong>partial</strong> in
+            this repository, even though the API and extension package exist.
+          </p>
+        </section>
+
+        <section class="section" id="boundaries">
+          <div class="section-head">
+            <span class="sec-num">07</span>
+            <h2>Security boundaries</h2>
+          </div>
+
+          <p>
+            Each row states the mechanism, then the boundary that a reader should not cross when
+            interpreting it. The boundary is part of the claim.
+          </p>
+
+          <div class="table-wrap">
+            <table>
+              <caption>Security controls and their stated boundaries.</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Control</th>
+                  <th scope="col">Implementation</th>
+                  <th scope="col">Boundary</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>At-rest encryption</strong></td>
+                  <td>AES-256-GCM with a 12-byte nonce per secret; the derived key lives in process memory.</td>
+                  <td>No HSM or KMS. A host-level memory compromise is outside the model.</td>
+                </tr>
+                <tr>
+                  <td><strong>Master phrase</strong></td>
+                  <td>BIP-39 12 words (128-bit entropy), PBKDF2-HMAC-SHA256 at 600,000 iterations, 16-byte salt.</td>
+                  <td>The phrase is the root of trust. Loss is unrecoverable; there is no escrow.</td>
+                </tr>
+                <tr>
+                  <td><strong>Sealed state</strong></td>
+                  <td>Global middleware returns <code>423</code> for every route outside the allowlist.</td>
+                  <td>Availability depends on a phrase holder being present after a restart.</td>
+                </tr>
+                <tr>
+                  <td><strong>Login</strong></td>
+                  <td>Bcrypt hashes; three failures lock the account for 15 minutes; passwords rotate at 30 days.</td>
+                  <td>Lockout is application-level; it is not a network rate limit or WAF.</td>
+                </tr>
+                <tr>
+                  <td><strong>TOTP</strong></td>
+                  <td>Mandatory enrollment in the login flow; secrets encrypted with the vault key; verification issues the JWT.</td>
+                  <td>If the vault is sealed, login cannot proceed; there is no separate recovery code path.</td>
+                </tr>
+                <tr>
+                  <td><strong>RBAC</strong></td>
+                  <td><code>org_admin</code>, <code>team_admin</code>, <code>member</code>; visibility per credential.</td>
+                  <td>No per-credential ACL beyond team and share scopes.</td>
+                </tr>
+                <tr>
+                  <td><strong>Quorum export</strong></td>
+                  <td>Majority of org-admin PINs; encrypted one-time export; action audited.</td>
+                  <td>Authorizes the application path; does not stop a host-level administrator.</td>
+                </tr>
+                <tr>
+                  <td><strong>Audit</strong></td>
+                  <td>Append-only rows with a 90-day retention purge on new log creation.</td>
+                  <td>Database-level, not WORM or an external SIEM sink.</td>
+                </tr>
+                <tr>
+                  <td><strong>License</strong></td>
+                  <td>RS256 JWT with issuer <code>LinkPass-KeyGen</code>; missing or expired returns <code>402</code>, invalid returns <code>403</code>.</td>
+                  <td>If no public key is configured, the middleware bypasses the check (development mode).</td>
+                </tr>
+                <tr>
+                  <td><strong>Development secrets</strong></td>
+                  <td>Compose ships a sample JWT secret; TLS certificates and a test license are in the repository.</td>
+                  <td>These are development artifacts. Replace them before any real deployment.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="section" id="findings">
+          <div class="section-head">
+            <span class="sec-num">08</span>
+            <h2>Findings</h2>
+          </div>
+
+          <p>
+            These are engineering findings from the build, not the results of an external security
+            audit. Each one changed the implementation or the scope of what is claimed.
+          </p>
+
+          <div class="findings">
+            <article class="finding">
+              <span class="fid">F-01</span>
+              <h3>A persistent master key was a liability</h3>
+              <p><span class="lbl">Symptom</span>The original build kept a <code>.master_key</code> file beside the application.</p>
+              <p><span class="lbl">Resolution</span>Remove the file, derive the key from the phrase at unseal, hold it only in memory, and delete the legacy file on a fresh install.</p>
+            </article>
+
+            <article class="finding">
+              <span class="fid">F-02</span>
+              <h3>Restarts had to fail closed</h3>
+              <p><span class="lbl">Symptom</span>A restart clears the in-memory key, so vault routes would fail unpredictably.</p>
+              <p><span class="lbl">Resolution</span>Add a global seal middleware with a small allowlist, a status endpoint, and an explicit <code>423</code> response.</p>
+            </article>
+
+            <article class="finding">
+              <span class="fid">F-03</span>
+              <h3>Quorum needed a deterministic threshold</h3>
+              <p><span class="lbl">Symptom</span>“A majority of admins” is ambiguous when admins are added or removed.</p>
+              <p><span class="lbl">Resolution</span>Calculate <code>max(1, (org_admins + 1) // 2)</code> at request time and ignore duplicate usernames in the supplied PIN list.</p>
+            </article>
+
+            <article class="finding">
+              <span class="fid">F-04</span>
+              <h3>Time-bound shares needed query-time filtering</h3>
+              <p><span class="lbl">Symptom</span>A share that expired was still returned by a naive join.</p>
+              <p><span class="lbl">Resolution</span>Filter <code>expires_at &gt; now</code> when building the vault list and carry the per-share clipboard TTL to the client.</p>
+            </article>
+
+            <article class="finding">
+              <span class="fid">F-05</span>
+              <h3>Extension payloads could be replayed</h3>
+              <p><span class="lbl">Symptom</span>A poll that returned an approved payload could be repeated.</p>
+              <p><span class="lbl">Resolution</span>Mark the request <code>consumed</code> on the first successful poll; subsequent polls return the terminal status.</p>
+            </article>
+
+            <article class="finding">
+              <span class="fid">F-06</span>
+              <h3>The approval UI did not ship with the API</h3>
+              <p><span class="lbl">Symptom</span>The sidebar links to <code>#extension-requests</code>, but no route renders that view.</p>
+              <p><span class="lbl">Resolution</span>Scope the extension as partial in this publication; the backend and MV3 package are present, the admin screen is not.</p>
+            </article>
+
+            <article class="finding">
+              <span class="fid">F-07</span>
+              <h3>PostgreSQL was configured but not wired</h3>
+              <p><span class="lbl">Symptom</span>Compose sets <code>DATABASE_URL</code> to PostgreSQL and starts a database service, while <code>server/database.py</code> hardcodes a SQLite URL.</p>
+              <p><span class="lbl">Resolution</span>Document the current runtime as SQLite and treat the PostgreSQL path as an unfinished migration, not a supported deployment claim.</p>
+            </article>
+
+            <article class="finding">
+              <span class="fid">F-08</span>
+              <h3>Injection is inherently visible to the page</h3>
+              <p><span class="lbl">Symptom</span>Once the password is written into a DOM field, page scripts can read it, even if the overlay is isolated.</p>
+              <p><span class="lbl">Resolution</span>Reduce exposure with immediate submission and a 500 ms clear, and state the residual risk instead of claiming the clipboard was the only leak path.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" id="limits">
+          <div class="section-head">
+            <span class="sec-num">09</span>
+            <h2>Scope &amp; limits</h2>
+          </div>
+
+          <div class="cols">
+            <div>
+              <h3>In scope</h3>
+              <ul class="checklist">
+                <li>Single-organization team vault</li>
+                <li>AES-256-GCM at rest and in-memory key handling</li>
+                <li>Seal / unseal lifecycle and 423 gate</li>
+                <li>TOTP login, lockout, password rotation</li>
+                <li>RBAC, team and user sharing, audit</li>
+                <li>Quorum-controlled encrypted export</li>
+                <li>MV3 extension and injection API</li>
+                <li>Docker and standalone server packaging</li>
+              </ul>
+            </div>
+            <div>
+              <h3>Not claimed</h3>
+              <ul class="checklist no">
+                <li>High availability or multi-node clustering</li>
+                <li>HSM, KMS, or hardware-backed key storage</li>
+                <li>SSO, SCIM, or directory sync</li>
+                <li>Mobile applications</li>
+                <li>PostgreSQL runtime support</li>
+                <li>External penetration test or certification</li>
+                <li>Recovery of a lost master phrase</li>
+              </ul>
+            </div>
+          </div>
+
+          <h3>Limitations</h3>
+          <ol class="limits">
+            <li><strong>Phrase loss is permanent.</strong> There is no escrow, recovery code, or vendor reset. A lost phrase means the vault is unreadable.</li>
+            <li><strong>Restart equals downtime until unseal.</strong> The design trades availability for the removal of a persistent key.</li>
+            <li><strong>The key lives in process memory.</strong> A root-level memory compromise or core dump is outside the protection model.</li>
+            <li><strong>Audit retention is destructive by design.</strong> Logs older than 90 days are purged when a new entry is written; export them if you need a longer record.</li>
+            <li><strong>Clipboard clearing is best-effort.</strong> The client writes an empty string after the TTL; OS clipboard managers may retain history.</li>
+            <li><strong>Extension scope is broad.</strong> The manifest uses <code>&lt;all_urls&gt;</code> and attaches to the first password field; page scripts can observe post-injection values.</li>
+            <li><strong>License enforcement is conditional.</strong> With no public key configured, the middleware allows requests; this is a development convenience, not a production control.</li>
+            <li><strong>The database migration is incomplete.</strong> The current engine is SQLite even when compose provides PostgreSQL.</li>
+            <li><strong>No independent review.</strong> The repository contains no external audit report; the cryptographic primitives are standard, but the implementation has not been third-party assessed.</li>
+          </ol>
+        </section>
+
+        <section class="section" id="evidence">
+          <div class="section-head">
+            <span class="sec-num">10</span>
+            <h2>Evidence</h2>
+          </div>
+
+          <p>
+            The repository is private, so paths are cited rather than linked. Each entry is a place
+            where the described behaviour can be inspected. This is evidence of implementation, not
+            an audit opinion.
+          </p>
+
+          <div class="table-wrap">
+            <table>
+              <caption>Implementation evidence in the reviewed repository.</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Path</th>
+                  <th scope="col">What it demonstrates</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>server/crypto.py</code></td>
+                  <td>BIP-39 phrase generation, PBKDF2 at 600,000 iterations, AES-GCM encrypt/decrypt, in-memory key, legacy key-file removal.</td>
+                </tr>
+                <tr>
+                  <td><code>server/main.py</code></td>
+                  <td>The 423 seal middleware, allowlist, status endpoint, and unseal endpoint.</td>
+                </tr>
+                <tr>
+                  <td><code>server/routers/auth.py</code></td>
+                  <td>Login, mandatory TOTP setup and verification, lockout, password-age prompt.</td>
+                </tr>
+                <tr>
+                  <td><code>server/routers/admin.py</code></td>
+                  <td>Quorum formula, admin PIN verification, export encryption, audit write.</td>
+                </tr>
+                <tr>
+                  <td><code>server/routers/passwords.py</code></td>
+                  <td>Vault reads, 2FA-gated reveal, time-bound shares, clipboard TTL.</td>
+                </tr>
+                <tr>
+                  <td><code>server/routers/extension.py</code></td>
+                  <td>Request, approve, reject, poll, and one-shot consume.</td>
+                </tr>
+                <tr>
+                  <td><code>extension/manifest.json</code></td>
+                  <td>Manifest V3, permissions, content-script scope.</td>
+                </tr>
+                <tr>
+                  <td><code>extension/content.js</code></td>
+                  <td>Closed shadow DOM, attribute check, instant submission, auto-clear.</td>
+                </tr>
+                <tr>
+                  <td><code>server/database.py</code></td>
+                  <td>The SQLite engine that contradicts the PostgreSQL service in compose.</td>
+                </tr>
+                <tr>
+                  <td><code>docker-compose.yml</code>, <code>LinkPass.spec</code></td>
+                  <td>Docker and standalone packaging paths.</td>
+                </tr>
+                <tr>
+                  <td><code>docs/PRD.md</code>, <code>docs/SRD.md</code>, <code>docs/ARCHITECTURE.md</code></td>
+                  <td>Product requirements, software requirements, and the original architecture record.</td>
+                </tr>
+                <tr>
+                  <td><code>phase_1_details.txt</code>, <code>phase_2_details.txt</code>, <code>phase_3_details.txt</code></td>
+                  <td>The change record for the seal rework, time-bound sharing, and extension.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="proof-strip">
+            <div class="proof-card">
+              <span class="k">Seal</span>
+              <strong>600,000 PBKDF2 iterations</strong>
+              <p>SHA-256, 32-byte key, 16-byte salt, AES-GCM with a 12-byte nonce.</p>
+            </div>
+            <div class="proof-card">
+              <span class="k">Quorum</span>
+              <strong>Majority of org admins</strong>
+              <p>Unique PINs, calculated per request, with a one-time encrypted export.</p>
+            </div>
+            <div class="proof-card">
+              <span class="k">Retention</span>
+              <strong>90-day audit window</strong>
+              <p>Rows older than the cutoff are deleted when a new audit entry is written.</p>
+            </div>
+          </div>
+
+          <h3>Reproduce the Docker path</h3>
+          <p>
+            The compose file starts the API and a PostgreSQL service, but the current engine is
+            SQLite. The server also ships development TLS material and a sample JWT secret; replace
+            them before exposing the service.
+          </p>
+          <pre><code>docker compose up -d --build
+# open https://localhost
+# first boot prints the 12-word phrase once
+# after a restart, unseal explicitly:
+curl -k -X POST https://localhost/api/system/unseal \
+  -H "Content-Type: application/json" \
+  -d '{"phrase":"&lt;your 12 words&gt;"}'</code></pre>
+
+          <h3>Inspect the sealed state</h3>
+          <pre><code>GET  /health
+GET  /api/system/status      # {"sealed": true}
+POST /api/system/unseal      # {"phrase": "..."}
+# every other route returns 423 while sealed</code></pre>
+
+          <h3>What this evidence proves</h3>
+          <ul>
+            <li>The seal, encryption, TOTP, RBAC, quorum export, audit, and extension paths exist in code and are connected to the data model.</li>
+            <li>The vault genuinely fails closed on restart: the key is not persisted, and the middleware returns 423.</li>
+            <li>The export path requires a calculated majority of admin PINs and encrypts the result with a one-time password.</li>
+          </ul>
+
+          <h3>What it does not prove</h3>
+          <ul>
+            <li>That the cryptographic implementation has been independently reviewed or side-channel tested.</li>
+            <li>That the deployment is highly available, multi-node, or backed by PostgreSQL at runtime.</li>
+            <li>That the extension’s injection is safe against a hostile page script after the value enters the DOM.</li>
+            <li>That the admin approval UI is complete; the reviewed build exposes the link without a render route.</li>
+          </ul>
+
+          <p style="margin-top:22px">
+            Marketing reference:
+            <a href="https://link-pass-site.netlify.app" rel="noopener" target="_blank">link-pass-site.netlify.app</a>
+            <span aria-hidden="true"> ↗</span>
+          </p>
+        </section>
+
+        <section class="section" id="summary">
+          <div class="section-head">
+            <span class="sec-num">11</span>
+            <h2>Summary</h2>
+          </div>
+
+          <div class="summary-box">
+            <p>
+              LinkPass makes the root of trust explicit. The vault is sealed by default, the key
+              lives only in memory, and the highest-risk operation requires a majority of admins.
+            </p>
+            <p>
+              The costs are real: someone must hold the phrase, a restart is downtime until unseal,
+              and the quorum protects the application path rather than a hostile host administrator.
+              The build is strongest where the design is most opinionated — the seal, the derivation,
+              the one-shot extension payload, and the export threshold.
+            </p>
+            <p>
+              It is also honest about what is unfinished: the PostgreSQL runtime, the admin approval
+              screen, and independent review. The correct description is “implemented and
+              documented”, not “certified”.
+            </p>
+          </div>
+
+          <a class="top-link" href="#top">Back to top ↑</a>
+        </section>
+
+        <section class="section" id="authors">
+          <div class="section-head">
+            <span class="sec-num">12</span>
+            <h2>Authors &amp; attribution</h2>
+          </div>
+
+          <div class="byline">
+            <p><strong>Written by</strong> David Idemudia Odige.</p>
+            <p>
+              Source reviewed at commit <span class="mono">8822f23</span> (5 October 2026).
+              Publication prepared 20 October 2026.
+            </p>
+            <p>
+              LinkPass is proprietary software. This page publishes architecture, method, and
+              engineering findings; it does not publish the master phrase, keys, credentials, or
+              customer data.
+            </p>
+            <p>
+              <a href="https://github.com/OdigieDavidIdemudia" rel="author noopener" target="_blank">github.com/OdigieDavidIdemudia</a>
+            </p>
+          </div>
+        </section>
+
+      </article>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap foot-inner">
+    <p>LinkPass publication · Documentation, not marketing.</p>
+    <div class="foot-links">
+      <a href="https://link-pass-site.netlify.app" rel="noopener" target="_blank">Marketing reference</a>
+      <a href="#top">Back to top</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  var button = document.getElementById('theme-toggle');
+  if (!button) return;
+
+  var label = button.querySelector('.label');
+  var glyph = button.querySelector('.glyph');
+  var media = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+
+  function stored() {
+    try { return localStorage.getItem('linkpass-publication-theme'); }
+    catch (e) { return null; }
+  }
+
+  function apply(theme, persist) {
+    root.setAttribute('data-theme', theme);
+    var dark = theme === 'dark';
+    button.setAttribute('aria-pressed', dark ? 'true' : 'false');
+    button.setAttribute('aria-label', dark ? 'Switch to light theme' : 'Switch to dark theme');
+    if (label) label.textContent = dark ? 'Light' : 'Dark';
+    if (glyph) glyph.textContent = dark ? '☀' : '☾';
+    if (persist) {
+      try { localStorage.setItem('linkpass-publication-theme', theme); } catch (e) {}
+    }
+  }
+
+  apply(root.getAttribute('data-theme') === 'dark' ? 'dark' : 'light', false);
+
+  button.addEventListener('click', function () {
+    var next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    apply(next, true);
+  });
+
+  if (media) {
+    var onChange = function (event) {
+      if (!stored()) apply(event.matches ? 'dark' : 'light', false);
+    };
+    if (media.addEventListener) media.addEventListener('change', onChange);
+    else if (media.addListener) media.addListener(onChange);
+  }
+})();
+</script>
+
+</body>
+</html>
