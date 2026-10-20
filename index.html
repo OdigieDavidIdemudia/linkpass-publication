@@ -1289,7 +1289,7 @@ footer {
       <p>
         <strong>This page publishes method and architecture, not secrets.</strong>
         It contains no master phrase, JWT secret, license key, salt file, credential, or customer
-        record. Statements are scoped to the source reviewed above. The repository is private;
+        record. Statements are scoped to the source reviewed above. The product repository is private;
         paths are cited as evidence, not linked.
       </p>
     </div>
@@ -1838,6 +1838,11 @@ footer {
                   <td>If no public key is configured, the middleware bypasses the check (development mode).</td>
                 </tr>
                 <tr>
+                  <td><strong>Bootstrap account</strong></td>
+                  <td>First boot creates <code>admin</code> with password <code>admin</code>, an <code>org_admin</code> role, and a generated TOTP secret printed to the log.</td>
+                  <td>Change the password and protect the TOTP secret immediately; no forced rotation is shown.</td>
+                </tr>
+                <tr>
                   <td><strong>Development secrets</strong></td>
                   <td>Compose ships a sample JWT secret; TLS certificates and a test license are in the repository.</td>
                   <td>These are development artifacts. Replace them before any real deployment.</td>
@@ -1972,7 +1977,7 @@ footer {
           </div>
 
           <p>
-            The repository is private, so paths are cited rather than linked. Each entry is a place
+            The product repository is private, so paths are cited rather than linked. Each entry is a place
             where the described behaviour can be inspected. This is evidence of implementation, not
             an audit opinion.
           </p>
